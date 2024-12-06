@@ -1,0 +1,10 @@
+[package]
+name = "pmortem"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.167"
+mach2 = "0.4.2"
