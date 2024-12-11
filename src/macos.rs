@@ -12,7 +12,7 @@ use std::{ffi, mem};
 )]
 mod dyld_images;
 
-pub unsafe fn foo(pid: ffi::c_int) {
+pub unsafe fn inspect(pid: i32) -> super::Snapshot {
     let mut target = 0;
     let mut r = traps::task_for_pid(traps::mach_task_self(), pid, &mut target);
     assert_eq!(r, kern_return::KERN_SUCCESS);
@@ -77,17 +77,32 @@ pub unsafe fn foo(pid: ffi::c_int) {
     let task = Task {
         task_name: msg.task.name,
     };
+    let modules = task.modules();
 
     let mut pc = state.__pc;
     let mut fp = state.__fp;
 
-    task.modules();
+    let mut thread = super::Thread { backtrace: vec![] };
+    let mut depth = 0;
+    thread
+        .backtrace
+        .push(super::Backtrace::new(depth, pc, &modules));
 
-    println!("pc: {:#x}", pc);
     while fp > 0 {
         pc = task.read((fp as *const u64).offset(1));
-        println!("pc: {:#x}", pc);
+        if pc == 0 {
+            break;
+        }
+        depth += 1;
+        thread
+            .backtrace
+            .push(super::Backtrace::new(depth, pc, &modules));
         fp = task.read(fp as *const u64);
+    }
+
+    super::Snapshot {
+        threads: vec![thread],
+        modules,
     }
 }
 
@@ -137,7 +152,7 @@ impl Task {
             .into_owned()
     }
 
-    unsafe fn modules(&self) {
+    unsafe fn modules(&self) -> Vec<super::Module> {
         let mut info = task_info::task_dyld_info::default();
         let mut info_cnt = (mem::size_of_val(&info) / mem::size_of::<ffi::c_int>())
             as message::mach_msg_type_number_t;
@@ -152,31 +167,41 @@ impl Task {
         let all_image_infos =
             self.read(info.all_image_info_addr as *const dyld_images::dyld_all_image_infos);
 
-        for i in 0..all_image_infos.infoArrayCount {
-            let image_info = self.read(all_image_infos.infoArray.offset(i as _));
+        (0..all_image_infos.infoArrayCount)
+            .into_iter()
+            .map(|index| {
+                let image_info = self.read(all_image_infos.infoArray.offset(index as _));
+                let path = self.read_str(image_info.imageFilePath);
 
-            let image_path = self.read_str(image_info.imageFilePath);
+                let mut end_address = 0;
+                let mut slide = 0;
 
-            let mut image_size = 0;
-            #[allow(deprecated)]
-            let header_ptr = image_info.imageLoadAddress as *const libc::mach_header_64;
-            let header = self.read(header_ptr);
-            let mut lc_ptr = header_ptr.offset(1) as *const libc::load_command;
-            #[allow(deprecated)]
-            for _ in 0..header.sizeofcmds {
-                let lc = self.read(lc_ptr);
-                if lc.cmd == libc::LC_SEGMENT_64 {
-                    let seg = self.read(lc_ptr as *const libc::segment_command_64);
-                    image_size = image_size.max(seg.vmaddr + seg.vmsize + 1); // TODO
+                #[allow(deprecated)]
+                let header_ptr = image_info.imageLoadAddress as *const libc::mach_header_64;
+                let header = self.read(header_ptr);
+                let mut lc_ptr = header_ptr.offset(1) as *const libc::load_command;
+
+                #[allow(deprecated)]
+                for _ in 0..header.sizeofcmds {
+                    let lc = self.read(lc_ptr);
+                    if lc.cmd == libc::LC_SEGMENT_64 {
+                        let seg = self.read(lc_ptr as *const libc::segment_command_64);
+                        if libc::strcmp(seg.segname.as_ptr(), c"__TEXT".as_ptr()) == 0 {
+                            slide = image_info.imageLoadAddress as u64 - seg.vmaddr;
+                        }
+                        end_address = end_address.max(slide + seg.vmaddr + seg.vmsize);
+                    }
+                    lc_ptr = (lc_ptr as usize + lc.cmdsize as usize) as _;
                 }
-                lc_ptr = (lc_ptr as usize + lc.cmdsize as usize) as _;
-            }
 
-            println!(
-                "image {}:\n  Path: {}\n  Load Address: {:p}\n  Size: {}",
-                i, image_path, image_info.imageLoadAddress, image_size,
-            );
-        }
+                super::Module {
+                    index,
+                    path,
+                    load_address: image_info.imageLoadAddress as _,
+                    end_address,
+                }
+            })
+            .collect()
     }
 }
 
