@@ -83,7 +83,7 @@ pub unsafe fn foo(pid: ffi::c_int) {
 
     task.modules();
 
-    println!("lr: {:#x}", state.__lr);
+    println!("pc: {:#x}", pc);
     while fp > 0 {
         pc = task.read((fp as *const u64).offset(1));
         println!("pc: {:#x}", pc);
@@ -141,7 +141,7 @@ impl Task {
         let mut info = task_info::task_dyld_info::default();
         let mut info_cnt = (mem::size_of_val(&info) / mem::size_of::<ffi::c_int>())
             as message::mach_msg_type_number_t;
-        let mut r = task::task_info(
+        let r = task::task_info(
             self.task_name,
             task_info::TASK_DYLD_INFO,
             &mut info as *mut _ as _,
@@ -158,9 +158,11 @@ impl Task {
             let image_path = self.read_str(image_info.imageFilePath);
 
             let mut image_size = 0;
+            #[allow(deprecated)]
             let header_ptr = image_info.imageLoadAddress as *const libc::mach_header_64;
             let header = self.read(header_ptr);
             let mut lc_ptr = header_ptr.offset(1) as *const libc::load_command;
+            #[allow(deprecated)]
             for _ in 0..header.sizeofcmds {
                 let lc = self.read(lc_ptr);
                 if lc.cmd == libc::LC_SEGMENT_64 {
