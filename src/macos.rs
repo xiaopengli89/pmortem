@@ -1,8 +1,8 @@
 use mach2::{
     exception_types, kern_return, mach_port, mach_types, message, ndr, port, structs, task,
-    task_info, thread_act, thread_status, traps, vm, vm_types,
+    task_info, thread_act, thread_status, traps, vm,
 };
-use std::{env, ffi, mem};
+use std::{ffi, mem};
 
 #[allow(
     non_snake_case,
@@ -11,7 +11,6 @@ use std::{env, ffi, mem};
     non_camel_case_types
 )]
 mod dyld_images;
-
 
 pub unsafe fn foo(pid: ffi::c_int) {
     let mut target = 0;
@@ -150,28 +149,11 @@ impl Task {
         );
         assert_eq!(r, kern_return::KERN_SUCCESS);
 
-        let mut all_image_infos: dyld_images::dyld_all_image_infos = mem::zeroed();
-        let mut c = 0;
-        r = vm::mach_vm_read_overwrite(
-            self.task_name,
-            info.all_image_info_addr,
-            mem::size_of_val(&all_image_infos) as _,
-            &mut all_image_infos as *mut _ as _,
-            &mut c,
-        );
-        assert_eq!(r, kern_return::KERN_SUCCESS);
+        let all_image_infos =
+            self.read(info.all_image_info_addr as *const dyld_images::dyld_all_image_infos);
 
         for i in 0..all_image_infos.infoArrayCount {
-            let mut image_info: dyld_images::dyld_image_info = mem::zeroed();
-            let mut image_info_cnt = 0;
-            r = vm::mach_vm_read_overwrite(
-                self.task_name,
-                all_image_infos.infoArray.offset(i as _) as _,
-                mem::size_of_val(&image_info) as _,
-                &mut image_info as *mut _ as _,
-                &mut image_info_cnt,
-            );
-            assert_eq!(r, kern_return::KERN_SUCCESS);
+            let image_info = self.read(all_image_infos.infoArray.offset(i as _));
 
             let image_path = self.read_str(image_info.imageFilePath);
 
