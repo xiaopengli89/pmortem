@@ -167,17 +167,15 @@ impl Task {
         let all_image_infos =
             self.read(info.all_image_info_addr as *const dyld_images::dyld_all_image_infos);
 
-        (0..all_image_infos.infoArrayCount)
-            .into_iter()
-            .map(|index| {
-                let image_info = self.read(all_image_infos.infoArray.offset(index as _));
-                let path = self.read_str(image_info.imageFilePath);
+        let parse_module =
+            |path_ptr: *const ffi::c_char, load_address: *const dyld_images::mach_header| {
+                let path = self.read_str(path_ptr);
 
-                let mut end_address = 0;
-                let mut slide = 0;
+                let mut slide;
+                let mut text_segment = None;
 
                 #[allow(deprecated)]
-                let header_ptr = image_info.imageLoadAddress as *const libc::mach_header_64;
+                let header_ptr = load_address as *const libc::mach_header_64;
                 let header = self.read(header_ptr);
                 let mut lc_ptr = header_ptr.offset(1) as *const libc::load_command;
 
@@ -187,21 +185,38 @@ impl Task {
                     if lc.cmd == libc::LC_SEGMENT_64 {
                         let seg = self.read(lc_ptr as *const libc::segment_command_64);
                         if libc::strcmp(seg.segname.as_ptr(), c"__TEXT".as_ptr()) == 0 {
-                            slide = image_info.imageLoadAddress as u64 - seg.vmaddr;
+                            slide = load_address as u64 - seg.vmaddr;
+                            text_segment = Some(super::Range {
+                                start: slide + seg.vmaddr,
+                                end: slide + seg.vmaddr + seg.vmsize,
+                            });
                         }
-                        end_address = end_address.max(slide + seg.vmaddr + seg.vmsize);
                     }
                     lc_ptr = (lc_ptr as usize + lc.cmdsize as usize) as _;
                 }
 
                 super::Module {
-                    index,
                     path,
-                    load_address: image_info.imageLoadAddress as _,
-                    end_address,
+                    load_address: load_address as _,
+                    text_segment,
                 }
-            })
-            .collect()
+            };
+
+        let mut modules = Vec::with_capacity(1 + all_image_infos.infoArrayCount as usize);
+
+        modules.push(parse_module(
+            all_image_infos.dyldPath,
+            all_image_infos.dyldImageLoadAddress,
+        ));
+        for i in 0..all_image_infos.infoArrayCount {
+            let image_info = self.read(all_image_infos.infoArray.offset(i as _));
+            modules.push(parse_module(
+                image_info.imageFilePath,
+                image_info.imageLoadAddress,
+            ));
+        }
+
+        modules
     }
 }
 

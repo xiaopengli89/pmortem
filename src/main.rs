@@ -38,7 +38,12 @@ impl Backtrace {
             depth,
             module: modules
                 .into_iter()
-                .find(|m| m.load_address <= address && address <= m.end_address)
+                .find(|m| {
+                    m.text_segment
+                        .as_ref()
+                        .map(|s| s.contains(address))
+                        .unwrap_or_default()
+                })
                 .map(ToOwned::to_owned),
             address,
             symbol: None,
@@ -48,12 +53,25 @@ impl Backtrace {
 
 #[derive(Serialize, Clone)]
 struct Module {
-    index: u32,
     path: String,
     #[serde(with = "hex")]
     load_address: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_segment: Option<Range>,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct Range {
     #[serde(with = "hex")]
-    end_address: u64,
+    start: u64,
+    #[serde(with = "hex")]
+    end: u64,
+}
+
+impl Range {
+    fn contains(&self, item: u64) -> bool {
+        self.start <= item && item <= self.end
+    }
 }
 
 mod hex {
