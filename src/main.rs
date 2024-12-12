@@ -17,7 +17,16 @@ struct Snapshot {
 }
 
 #[derive(Serialize)]
+struct Exception {
+    reason: i32,
+    code: [i32; 2],
+}
+
+#[derive(Serialize)]
 struct Thread {
+    id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exception: Option<Exception>,
     backtrace: Vec<Backtrace>,
 }
 
