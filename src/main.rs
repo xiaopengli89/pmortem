@@ -1,13 +1,31 @@
+use clap::{Parser, Subcommand};
 use serde::Serialize;
-use std::env;
+use std::path::PathBuf;
 
 mod macos;
 
 fn main() {
-    let pid: i32 = env::args().skip(1).next().unwrap().parse().unwrap();
+    let cli = Cli::parse();
+    let Commands::Inspect { pid, output } = cli.command;
     let snapshot = unsafe { macos::inspect(pid) };
-    let t = serde_json::to_string_pretty(&snapshot).unwrap();
-    println!("{t}");
+    let mut file = std::fs::File::create(&output).unwrap();
+    serde_json::to_writer_pretty(&mut file, &snapshot).unwrap();
+}
+
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Inspect {
+        pid: i32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 #[derive(Serialize)]
