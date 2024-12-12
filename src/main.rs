@@ -10,6 +10,7 @@ fn main() {
     let snapshot = unsafe { macos::inspect(pid) };
     let mut file = std::fs::File::create(&output).unwrap();
     serde_json::to_writer_pretty(&mut file, &snapshot).unwrap();
+    println!("snapshot written to {}", output.display());
 }
 
 #[derive(Parser)]

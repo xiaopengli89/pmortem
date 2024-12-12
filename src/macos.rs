@@ -55,6 +55,7 @@ pub unsafe fn inspect(pid: i32) -> super::Snapshot {
     );
     assert_eq!(r, kern_return::KERN_SUCCESS);
 
+    println!("inspecting process: {}", pid);
     let wait_r = wait_for(pid, &exc_port);
     let mut snapshot = super::Snapshot {
         threads: vec![],
