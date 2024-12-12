@@ -203,19 +203,39 @@ impl Task {
                         id_info
                     };
 
-                    // TODO: x86_THREAD_STATE64
-                    let mut state = structs::arm_thread_state64_t::new();
-                    let mut count = structs::arm_thread_state64_t::count();
-                    r = thread_act::thread_get_state(
-                        thread_port.name,
-                        thread_status::ARM_THREAD_STATE64,
-                        &mut state as *mut _ as _,
-                        &mut count,
-                    );
-                    assert_eq!(r, kern_return::KERN_SUCCESS);
+                    let mut pc;
+                    let mut fp;
 
-                    let mut pc = state.__pc;
-                    let mut fp = state.__fp;
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        let mut state = structs::arm_thread_state64_t::new();
+                        let mut count = structs::arm_thread_state64_t::count();
+                        r = thread_act::thread_get_state(
+                            thread_port.name,
+                            thread_status::ARM_THREAD_STATE64,
+                            &mut state as *mut _ as _,
+                            &mut count,
+                        );
+                        assert_eq!(r, kern_return::KERN_SUCCESS);
+
+                        pc = state.__pc;
+                        fp = state.__fp;
+                    }
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        let mut state = structs::x86_thread_state64_t::new();
+                        let mut count = structs::x86_thread_state64_t::count();
+                        r = thread_act::thread_get_state(
+                            thread_port.name,
+                            thread_status::x86_THREAD_STATE64,
+                            &mut state as *mut _ as _,
+                            &mut count,
+                        );
+                        assert_eq!(r, kern_return::KERN_SUCCESS);
+
+                        pc = state.__rip;
+                        fp = state.__rbp;
+                    }
 
                     let mut thread = super::Thread {
                         id: thread_id_info.thread_id,
