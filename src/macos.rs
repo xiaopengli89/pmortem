@@ -15,8 +15,22 @@ use std::{
     non_camel_case_types
 )]
 mod dyld_images;
+#[allow(
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code,
+    non_camel_case_types
+)]
+mod loader;
+#[allow(
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code,
+    non_camel_case_types
+)]
+mod nlist;
 
-pub unsafe fn inspect(pid: i32) -> super::Snapshot {
+pub unsafe fn inspect(pid: i32, catch_exit: bool) -> super::Snapshot {
     let mut r;
 
     let task = {
@@ -46,7 +60,7 @@ pub unsafe fn inspect(pid: i32) -> super::Snapshot {
     );
     assert_eq!(r, kern_return::KERN_SUCCESS);
 
-    r = task_set_exception_ports(
+    r = dyld_images::task_set_exception_ports(
         task.port.name,
         exception_types::EXC_MASK_ALL,
         exc_port.name,
@@ -54,6 +68,10 @@ pub unsafe fn inspect(pid: i32) -> super::Snapshot {
         thread_status::THREAD_STATE_NONE,
     );
     assert_eq!(r, kern_return::KERN_SUCCESS);
+
+    if catch_exit {
+        // set breakpoint for _exit
+    }
 
     println!("inspecting process: {}", pid);
     let wait_r = wait_for(pid, &exc_port);
@@ -294,25 +312,47 @@ impl Task {
             |path_ptr: *const ffi::c_char, load_address: *const dyld_images::mach_header| {
                 let path = self.read_str(path_ptr);
 
-                let mut slide;
+                let mut slide = 0;
                 let mut text_segment = None;
 
-                #[allow(deprecated)]
-                let header_ptr = load_address as *const libc::mach_header_64;
+                let header_ptr = load_address as *const loader::mach_header_64;
                 let header = self.read(header_ptr);
                 let mut lc_ptr = header_ptr.offset(1) as *const libc::load_command;
+                let mut offset = 0;
+                let mut exit_address = None;
 
-                #[allow(deprecated)]
                 for _ in 0..header.sizeofcmds {
                     let lc = self.read(lc_ptr);
-                    if lc.cmd == libc::LC_SEGMENT_64 {
+                    if lc.cmd == loader::LC_SEGMENT_64 {
                         let seg = self.read(lc_ptr as *const libc::segment_command_64);
-                        if libc::strcmp(seg.segname.as_ptr(), c"__TEXT".as_ptr()) == 0 {
+                        let seg_name = ffi::CStr::from_ptr(seg.segname.as_ptr());
+                        if seg_name == c"__TEXT" {
                             slide = load_address as u64 - seg.vmaddr;
                             text_segment = Some(super::Range {
                                 start: slide + seg.vmaddr,
                                 end: slide + seg.vmaddr + seg.vmsize,
                             });
+                        } else if seg_name == c"__LINKEDIT" {
+                            offset = seg.vmaddr - seg.fileoff;
+                        }
+                    } else if lc.cmd == loader::LC_SYMTAB {
+                        let sym_tab_cmd = self.read(lc_ptr as *const loader::symtab_command);
+                        let fixed = offset + slide;
+                        let sym_tab_ptr =
+                            (sym_tab_cmd.symoff as u64 + fixed) as *const nlist::nlist_64;
+                        let sym_str_ptr = (sym_tab_cmd.stroff as u64 + fixed) as *const ffi::c_char;
+                        for i in 0..sym_tab_cmd.nsyms {
+                            let sym = self.read(sym_tab_ptr.offset(i as _));
+                            if (sym.n_type as u32 & (nlist::N_STAB | nlist::N_PEXT)) > 0
+                                || (sym.n_type as u32 & nlist::N_SECT) == 0
+                            {
+                                continue;
+                            }
+                            let sym_name =
+                                self.read_str(sym_str_ptr.offset(sym.n_un.n_strx as isize));
+                            if sym_name == "__exit" {
+                                exit_address = Some(sym.n_value);
+                            }
                         }
                     }
                     lc_ptr = (lc_ptr as usize + lc.cmdsize as usize) as _;
@@ -322,6 +362,7 @@ impl Task {
                     path,
                     load_address: load_address as _,
                     text_segment,
+                    exit_address,
                 }
             };
 
@@ -406,14 +447,4 @@ struct ExceptionMessage {
     code_count: message::mach_msg_type_number_t,
     code: [exception_types::exception_data_type_t; 2],
     trailer: message::mach_msg_trailer_t,
-}
-
-extern "C" {
-    fn task_set_exception_ports(
-        task: mach_types::task_t,
-        exception_mask: exception_types::exception_mask_t,
-        port: port::mach_port_t,
-        behavior: exception_types::exception_behavior_t,
-        flavor: thread_status::thread_state_flavor_t,
-    ) -> kern_return::kern_return_t;
 }

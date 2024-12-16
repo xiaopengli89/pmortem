@@ -6,8 +6,8 @@ mod macos;
 
 fn main() {
     let cli = Cli::parse();
-    let Commands::Inspect { pid, output } = cli.command;
-    let snapshot = unsafe { macos::inspect(pid) };
+    let Commands::Inspect { pid, output, exit } = cli.command;
+    let snapshot = unsafe { macos::inspect(pid, exit) };
     let mut file = std::fs::File::create(&output).unwrap();
     serde_json::to_writer_pretty(&mut file, &snapshot).unwrap();
     println!("snapshot written to {}", output.display());
@@ -26,6 +26,8 @@ enum Commands {
         pid: i32,
         #[arg(short, long)]
         output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        exit: bool,
     },
 }
 
@@ -86,6 +88,8 @@ struct Module {
     load_address: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     text_segment: Option<Range>,
+    #[serde(skip)]
+    exit_address: Option<u64>,
 }
 
 #[derive(Serialize, Clone, Copy)]
