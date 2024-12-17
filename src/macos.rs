@@ -5,7 +5,8 @@ use mach2::{
 use std::{
     ffi, mem,
     os::fd::{self, AsRawFd, FromRawFd},
-    ptr,
+    process, ptr, thread,
+    time::Duration,
 };
 
 #[allow(
@@ -60,18 +61,48 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool) -> super::Snapshot {
     );
     assert_eq!(r, kern_return::KERN_SUCCESS);
 
-    r = dyld_images::task_set_exception_ports(
-        task.port.name,
-        exception_types::EXC_MASK_ALL,
-        exc_port.name,
-        exception_types::EXCEPTION_DEFAULT as _,
-        thread_status::THREAD_STATE_NONE,
-    );
-    assert_eq!(r, kern_return::KERN_SUCCESS);
-
     if catch_exit {
-        // set breakpoint for _exit
+        thread::spawn(move || {
+            let _ = process::Command::new("lldb")
+                .args([
+                    "-p",
+                    &pid.to_string(),
+                    "-o",
+                    "breakpoint set --name __exit",
+                    "-o",
+                    "c",
+                    "-o",
+                    "quit",
+                ])
+                .output()
+                .unwrap();
+        });
+        thread::sleep(Duration::from_secs(1));
     }
+
+    let _old_exc_port = {
+        let mut old_mask = 0;
+        let mut old_mask_cnt = 1;
+        let mut old_exc_port_name = port::MACH_PORT_NULL;
+        let mut old_behaviors = 0;
+        let mut old_flavors = 0;
+        r = dyld_images::task_swap_exception_ports(
+            task.port.name,
+            exception_types::EXC_MASK_ALL,
+            exc_port.name,
+            exception_types::EXCEPTION_DEFAULT as _,
+            thread_status::THREAD_STATE_NONE,
+            &mut old_mask,
+            &mut old_mask_cnt,
+            &mut old_exc_port_name,
+            &mut old_behaviors,
+            &mut old_flavors,
+        );
+        assert_eq!(r, kern_return::KERN_SUCCESS);
+        Port {
+            name: old_exc_port_name,
+        }
+    };
 
     println!("inspecting process: {}", pid);
     let wait_r = wait_for(pid, &exc_port);
@@ -351,7 +382,7 @@ impl Task {
                             let sym_name =
                                 self.read_str(sym_str_ptr.offset(sym.n_un.n_strx as isize));
                             if sym_name == "__exit" {
-                                exit_address = Some(sym.n_value);
+                                exit_address = Some(sym.n_value + slide);
                             }
                         }
                     }

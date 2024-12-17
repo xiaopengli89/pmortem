@@ -19,6 +19,6 @@ fn foo() {
     }
     io::stdin().read_line(&mut String::new()).unwrap();
 
-    let a: *mut i32 = ptr::null_mut();
-    let _b = hint::black_box(unsafe { *a.offset(1) });
+    let _ = hint::black_box(unsafe { *ptr::null_mut::<i32>().offset(1) });
+    process::exit(0);
 }
