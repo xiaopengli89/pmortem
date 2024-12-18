@@ -1,4 +1,4 @@
-use std::{fs::File, ptr};
+use std::{fs::File, mem, ptr};
 use windows::Win32::{
     Foundation,
     System::{Diagnostics::Debug, Threading},
@@ -9,6 +9,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
 
     Debug::DebugActiveProcess(process_id).unwrap();
     let mut event = Debug::DEBUG_EVENT::default();
+    println!("inspecting process: {}", pid);
     loop {
         Debug::WaitForDebugEvent(&mut event, Threading::INFINITE).unwrap();
         match event.dwDebugEventCode {
@@ -19,8 +20,9 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                     event.dwThreadId,
                 )
                 .unwrap();
-                let mut ctx = Debug::CONTEXT::default();
-                Debug::GetThreadContext(thread_h, &mut ctx).unwrap();
+                let mut ctx: crash_context::CONTEXT = mem::zeroed();
+                ctx.ContextFlags = Debug::CONTEXT_ALL_AMD64.0;
+                Debug::GetThreadContext(thread_h, &mut ctx as *mut _ as _).unwrap();
 
                 minidump_writer::minidump_writer::MinidumpWriter::dump_crash_context(
                     crash_context::CrashContext {
@@ -29,7 +31,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                         exception_code: event.u.Exception.ExceptionRecord.ExceptionCode.0,
                         exception_pointers: &mut crash_context::EXCEPTION_POINTERS {
                             ExceptionRecord: &mut event.u.Exception.ExceptionRecord as *mut _ as _,
-                            ContextRecord: &mut ctx as *mut _ as _,
+                            ContextRecord: &mut ctx,
                         },
                     },
                     None,
@@ -54,7 +56,14 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                 }
                 break;
             }
-            _ => {}
+            _ => {
+                Debug::ContinueDebugEvent(
+                    event.dwProcessId,
+                    event.dwThreadId,
+                    Foundation::DBG_CONTINUE,
+                )
+                .unwrap();
+            }
         }
     }
 }

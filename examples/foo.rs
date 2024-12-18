@@ -1,4 +1,4 @@
-use std::{ffi, hint, io, process, ptr};
+use std::{hint, io, process, ptr};
 
 fn main() {
     println!("pid: {}", process::id());
@@ -7,7 +7,10 @@ fn main() {
 }
 
 fn foo() {
+    #[cfg(unix)]
     unsafe {
+        use std::ffi;
+
         let mut buf = ptr::null_mut();
         let sz = libc::backtrace(&mut buf, 64);
         let mut sym = libc::backtrace_symbols(&buf, sz);

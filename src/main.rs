@@ -12,9 +12,13 @@ fn main() {
     let Commands::Inspect { pid, output, exit } = cli.command;
     let mut output_file = File::create(&output).unwrap();
     #[cfg(target_os = "macos")]
-    unsafe { macos::inspect(pid, exit, &mut output_file) };
+    unsafe {
+        macos::inspect(pid, exit, &mut output_file)
+    };
     #[cfg(windows)]
-    unsafe { windows::inspect(pid, exit, &mut output_file) };
+    unsafe {
+        windows::inspect(pid, exit, &mut output_file)
+    };
 }
 
 #[derive(Parser)]
