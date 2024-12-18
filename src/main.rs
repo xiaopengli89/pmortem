@@ -1,16 +1,14 @@
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::{fs::File, path::PathBuf};
 
 mod macos;
 
 fn main() {
     let cli = Cli::parse();
     let Commands::Inspect { pid, output, exit } = cli.command;
-    let snapshot = unsafe { macos::inspect(pid, exit) };
-    let mut file = std::fs::File::create(&output).unwrap();
-    serde_json::to_writer_pretty(&mut file, &snapshot).unwrap();
-    println!("snapshot written to {}", output.display());
+    let mut output_file = File::create(&output).unwrap();
+    unsafe { macos::inspect(pid, exit, &mut output_file) };
 }
 
 #[derive(Parser)]
@@ -31,6 +29,7 @@ enum Commands {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct Snapshot {
     threads: Vec<Thread>,

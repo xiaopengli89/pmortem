@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
+crash-context = "0.6.3"
+minidump-writer = "0.10.1"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.133"
 

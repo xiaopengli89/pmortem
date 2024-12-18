@@ -3,7 +3,9 @@ use mach2::{
     task_info, thread_act, thread_status, traps, vm, vm_types,
 };
 use std::{
-    ffi, mem,
+    ffi,
+    io::{Seek, Write},
+    mem,
     os::fd::{self, AsRawFd, FromRawFd},
     process, ptr, thread,
     time::Duration,
@@ -31,7 +33,7 @@ mod loader;
 )]
 mod nlist;
 
-pub unsafe fn inspect(pid: i32, catch_exit: bool) -> super::Snapshot {
+pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + Seek)) {
     let mut r;
 
     let task = {
@@ -106,19 +108,12 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool) -> super::Snapshot {
 
     println!("inspecting process: {}", pid);
     let wait_r = wait_for(pid, &exc_port);
-    let mut snapshot = super::Snapshot {
-        threads: vec![],
-        modules: vec![],
-    };
 
     match wait_r {
         Event::Exit(code) => {
             let _ = code;
         }
         Event::Exception => {
-            snapshot.modules = task.modules();
-            snapshot.threads = task.threads(&snapshot.modules);
-
             let mut msg: ExceptionMessage = mem::zeroed();
             r = message::mach_msg(
                 &mut msg.header,
@@ -131,41 +126,31 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool) -> super::Snapshot {
             );
             assert_eq!(r, kern_return::KERN_SUCCESS);
 
-            let _ = Port {
+            let exc_task_port = Port {
                 name: msg.task.name,
             };
             let exc_thread_port = Port {
                 name: msg.thread.name,
             };
-            let exc_thread_id_info = {
-                let mut id_info: libc::thread_identifier_info = mem::zeroed();
-                let mut cnt = libc::THREAD_IDENTIFIER_INFO_COUNT;
-                r = libc::thread_info(
-                    exc_thread_port.name,
-                    libc::THREAD_IDENTIFIER_INFO as _,
-                    &mut id_info as *mut _ as _,
-                    &mut cnt,
-                );
-                assert_eq!(r, kern_return::KERN_SUCCESS);
-                id_info
-            };
 
-            if let Some(i) = snapshot
-                .threads
-                .iter()
-                .position(|t| t.id == exc_thread_id_info.thread_id)
-            {
-                let mut exc_thread = snapshot.threads.remove(i);
-                exc_thread.exception = Some(super::Exception {
-                    reason: msg.exception,
-                    code: msg.code,
-                });
-                snapshot.threads.insert(0, exc_thread);
-            }
+            minidump_writer::minidump_writer::MinidumpWriter::with_crash_context(
+                crash_context::CrashContext {
+                    task: exc_task_port.name,
+                    thread: exc_thread_port.name,
+                    handler_thread: port::MACH_PORT_NULL,
+                    exception: (msg.exception != dyld_images::EXC_BREAKPOINT as i32).then_some(
+                        crash_context::ExceptionInfo {
+                            kind: msg.exception as _,
+                            code: msg.code[0] as _,
+                            subcode: (msg.code_count > 1).then_some(msg.code[1] as u64),
+                        },
+                    ),
+                },
+            )
+            .dump(output)
+            .unwrap();
         }
     }
-
-    snapshot
 }
 
 struct Port {
@@ -227,6 +212,7 @@ impl Task {
             .into_owned()
     }
 
+    #[allow(dead_code)]
     fn threads(&self, modules: &[super::Module]) -> Vec<super::Thread> {
         unsafe {
             let mut threads_ptr: mach_types::thread_act_array_t = ptr::null_mut();
@@ -324,6 +310,7 @@ impl Task {
         }
     }
 
+    #[allow(dead_code)]
     unsafe fn modules(&self) -> Vec<super::Module> {
         let mut info = task_info::task_dyld_info::default();
         let mut info_cnt = (mem::size_of_val(&info) / mem::size_of::<ffi::c_int>())
