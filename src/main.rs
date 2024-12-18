@@ -2,13 +2,19 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::{fs::File, path::PathBuf};
 
+#[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
 
 fn main() {
     let cli = Cli::parse();
     let Commands::Inspect { pid, output, exit } = cli.command;
     let mut output_file = File::create(&output).unwrap();
+    #[cfg(target_os = "macos")]
     unsafe { macos::inspect(pid, exit, &mut output_file) };
+    #[cfg(windows)]
+    unsafe { windows::inspect(pid, exit, &mut output_file) };
 }
 
 #[derive(Parser)]
@@ -62,6 +68,7 @@ struct Backtrace {
 }
 
 impl Backtrace {
+    #[allow(dead_code)]
     fn new(depth: u32, address: u64, modules: &[Module]) -> Self {
         Self {
             depth,
