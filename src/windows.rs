@@ -21,6 +21,10 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     )
     .unwrap();
 
+    if wow(process_h) != wow(Threading::GetCurrentProcess()) {
+        panic!("process arch mismatch");
+    }
+
     let _ = enable_privileges(Security::SE_DEBUG_NAME);
 
     Debug::DebugActiveProcess(process_id).unwrap();
@@ -39,8 +43,14 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                 )
                 .unwrap();
                 let mut ctx: crash_context::CONTEXT = mem::zeroed();
-                // TODO: wow64
-                ctx.ContextFlags = Debug::CONTEXT_FULL_AMD64.0;
+                #[cfg(target_arch = "x86_64")]
+                {
+                    ctx.ContextFlags = Debug::CONTEXT_FULL_AMD64.0;
+                }
+                #[cfg(target_arch = "x86")]
+                {
+                    ctx.ContextFlags = Debug::CONTEXT_FULL_X86.0;
+                }
                 Debug::GetThreadContext(thread_h, &mut ctx as *mut _ as _).unwrap();
 
                 minidump_writer::minidump_writer::MinidumpWriter::dump_crash_context(
@@ -100,7 +110,14 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     process_h.free();
 }
 
-// TODO: wow64
+fn wow(h: Foundation::HANDLE) -> bool {
+    let mut r = Foundation::BOOL::default();
+    unsafe {
+        Threading::IsWow64Process(h, &mut r).unwrap();
+    }
+    r.as_bool()
+}
+
 fn transfer_remote_exception_pointers(
     h: Foundation::HANDLE,
     record: &Debug::EXCEPTION_RECORD,
