@@ -20,8 +20,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     Debug::DebugActiveProcess(process_id).unwrap();
     let mut event = Debug::DEBUG_EVENT::default();
     println!("inspecting process: {}", pid);
-    loop {
-        Debug::WaitForDebugEvent(&mut event, Threading::INFINITE).unwrap();
+    while let Ok(_) = Debug::WaitForDebugEvent(&mut event, Threading::INFINITE) {
         match event.dwDebugEventCode {
             Debug::EXCEPTION_DEBUG_EVENT
                 if event.u.Exception.ExceptionRecord.ExceptionCode
@@ -53,6 +52,11 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                     output,
                 )
                 .unwrap();
+                let _ = Debug::ContinueDebugEvent(
+                    event.dwProcessId,
+                    event.dwThreadId,
+                    Foundation::DBG_EXCEPTION_NOT_HANDLED,
+                );
                 break;
             }
             Debug::EXIT_PROCESS_DEBUG_EVENT => {
@@ -69,6 +73,11 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                     )
                     .unwrap();
                 }
+                let _ = Debug::ContinueDebugEvent(
+                    event.dwProcessId,
+                    event.dwThreadId,
+                    Foundation::DBG_EXCEPTION_NOT_HANDLED,
+                );
                 break;
             }
             _ => {
@@ -81,6 +90,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
             }
         }
     }
+    let _ = Debug::DebugActiveProcessStop(process_id);
 }
 
 // TODO: wow64
