@@ -14,6 +14,12 @@ use windows::{
 
 pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     let process_id = pid as u32;
+    let mut process_h = Threading::OpenProcess(
+        Threading::PROCESS_VM_OPERATION | Threading::PROCESS_VM_WRITE,
+        false,
+        process_id,
+    )
+    .unwrap();
 
     let _ = enable_privileges(Security::SE_DEBUG_NAME);
 
@@ -43,7 +49,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                         thread_id: event.dwThreadId,
                         exception_code: event.u.Exception.ExceptionRecord.ExceptionCode.0,
                         exception_pointers: transfer_remote_exception_pointers(
-                            process_id,
+                            process_h,
                             &event.u.Exception.ExceptionRecord,
                             &ctx,
                         ) as _,
@@ -91,22 +97,16 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
         }
     }
     let _ = Debug::DebugActiveProcessStop(process_id);
+    process_h.free();
 }
 
 // TODO: wow64
 fn transfer_remote_exception_pointers(
-    process_id: u32,
+    h: Foundation::HANDLE,
     record: &Debug::EXCEPTION_RECORD,
     context: &crash_context::CONTEXT,
 ) -> *mut Debug::EXCEPTION_POINTERS {
     unsafe {
-        let mut h = Threading::OpenProcess(
-            Threading::PROCESS_VM_OPERATION | Threading::PROCESS_VM_WRITE,
-            false,
-            process_id,
-        )
-        .unwrap();
-
         let record_size = mem::size_of_val(record);
         let record_remote_ptr = Memory::VirtualAllocEx(
             h,
@@ -164,8 +164,6 @@ fn transfer_remote_exception_pointers(
             None,
         )
         .unwrap();
-
-        h.free();
 
         exception_pointers_remote_ptr as _
     }
