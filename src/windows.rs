@@ -5,10 +5,10 @@ use std::{
     ptr,
 };
 use windows::{
-    core::PCWSTR,
+    core::{Free, PCWSTR},
     Win32::{
         Foundation, Security,
-        System::{Diagnostics::Debug, Threading},
+        System::{Diagnostics::Debug, Memory, Threading},
     },
 };
 
@@ -34,6 +34,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                 )
                 .unwrap();
                 let mut ctx: crash_context::CONTEXT = mem::zeroed();
+                // TODO: wow64
                 ctx.ContextFlags = Debug::CONTEXT_FULL_AMD64.0;
                 Debug::GetThreadContext(thread_h, &mut ctx as *mut _ as _).unwrap();
 
@@ -42,10 +43,11 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                         process_id: event.dwProcessId,
                         thread_id: event.dwThreadId,
                         exception_code: event.u.Exception.ExceptionRecord.ExceptionCode.0,
-                        exception_pointers: &mut crash_context::EXCEPTION_POINTERS {
-                            ExceptionRecord: &mut event.u.Exception.ExceptionRecord as *mut _ as _,
-                            ContextRecord: &mut ctx,
-                        },
+                        exception_pointers: transfer_remote_exception_pointers(
+                            process_id,
+                            &event.u.Exception.ExceptionRecord,
+                            &ctx,
+                        ) as _,
                     },
                     None,
                     output,
@@ -78,6 +80,84 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
                 .unwrap();
             }
         }
+    }
+}
+
+// TODO: wow64
+fn transfer_remote_exception_pointers(
+    process_id: u32,
+    record: &Debug::EXCEPTION_RECORD,
+    context: &crash_context::CONTEXT,
+) -> *mut Debug::EXCEPTION_POINTERS {
+    unsafe {
+        let mut h = Threading::OpenProcess(
+            Threading::PROCESS_VM_OPERATION | Threading::PROCESS_VM_WRITE,
+            false,
+            process_id,
+        )
+        .unwrap();
+
+        let record_size = mem::size_of_val(record);
+        let record_remote_ptr = Memory::VirtualAllocEx(
+            h,
+            None,
+            record_size,
+            Memory::MEM_COMMIT | Memory::MEM_RESERVE,
+            Memory::PAGE_READWRITE,
+        );
+        assert!(!record_remote_ptr.is_null());
+        Debug::WriteProcessMemory(
+            h,
+            record_remote_ptr,
+            record as *const _ as _,
+            record_size,
+            None,
+        )
+        .unwrap();
+
+        let context_size = mem::size_of_val(context);
+        let context_remote_ptr = Memory::VirtualAllocEx(
+            h,
+            None,
+            context_size,
+            Memory::MEM_COMMIT | Memory::MEM_RESERVE,
+            Memory::PAGE_READWRITE,
+        );
+        assert!(!context_remote_ptr.is_null());
+        Debug::WriteProcessMemory(
+            h,
+            context_remote_ptr,
+            context as *const _ as _,
+            context_size,
+            None,
+        )
+        .unwrap();
+
+        let exception_pointers = Debug::EXCEPTION_POINTERS {
+            ExceptionRecord: record_remote_ptr as _,
+            ContextRecord: context_remote_ptr as _,
+        };
+        let exception_pointers_size = mem::size_of_val(&exception_pointers);
+        let exception_pointers_remote_ptr = Memory::VirtualAllocEx(
+            h,
+            None,
+            exception_pointers_size,
+            Memory::MEM_COMMIT | Memory::MEM_RESERVE,
+            Memory::PAGE_READWRITE,
+        );
+        assert!(!exception_pointers_remote_ptr.is_null());
+        Debug::WriteProcessMemory(
+            h,
+            exception_pointers_remote_ptr,
+            &exception_pointers as *const _ as _,
+            exception_pointers_size,
+            None,
+        )
+        .unwrap();
+
+        h.free();
+
+        exception_pointers_remote_ptr as _
     }
 }
 
