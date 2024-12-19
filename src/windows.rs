@@ -23,7 +23,10 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     loop {
         Debug::WaitForDebugEvent(&mut event, Threading::INFINITE).unwrap();
         match event.dwDebugEventCode {
-            Debug::EXCEPTION_DEBUG_EVENT => {
+            Debug::EXCEPTION_DEBUG_EVENT
+                if event.u.Exception.ExceptionRecord.ExceptionCode
+                    != Foundation::EXCEPTION_BREAKPOINT =>
+            {
                 let thread_h = Threading::OpenThread(
                     Threading::THREAD_GET_CONTEXT,
                     Foundation::FALSE,
