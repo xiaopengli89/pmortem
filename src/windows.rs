@@ -5,7 +5,7 @@ use std::{
     ptr,
 };
 use windows::{
-    core::{Free, PCWSTR},
+    core::{self, Free, PCWSTR},
     Win32::{
         Foundation, Security,
         System::{Diagnostics::Debug, Memory, Threading},
@@ -15,7 +15,7 @@ use windows::{
 pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
     let process_id = pid as u32;
 
-    enable_privileges(Security::SE_DEBUG_NAME);
+    let _ = enable_privileges(Security::SE_DEBUG_NAME);
 
     Debug::DebugActiveProcess(process_id).unwrap();
     let mut event = Debug::DEBUG_EVENT::default();
@@ -161,19 +161,18 @@ fn transfer_remote_exception_pointers(
     }
 }
 
-fn enable_privileges(name: PCWSTR) {
+fn enable_privileges(name: PCWSTR) -> core::Result<()> {
     unsafe {
         let mut token_handle: Foundation::HANDLE = mem::zeroed();
         Threading::OpenProcessToken(
             Threading::GetCurrentProcess(),
             Security::TOKEN_ADJUST_PRIVILEGES,
             &mut token_handle,
-        )
-        .unwrap();
+        )?;
         let token_handle = OwnedHandle::from_raw_handle(token_handle.0 as _);
 
         let mut luid: Foundation::LUID = mem::zeroed();
-        Security::LookupPrivilegeValueW(None, name, &mut luid).unwrap();
+        Security::LookupPrivilegeValueW(None, name, &mut luid)?;
 
         let mut new_state: Security::TOKEN_PRIVILEGES = mem::zeroed();
         new_state.PrivilegeCount = 1;
@@ -188,6 +187,5 @@ fn enable_privileges(name: PCWSTR) {
             None,
             None,
         )
-        .unwrap();
     }
 }
