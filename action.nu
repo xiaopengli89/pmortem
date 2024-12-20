@@ -18,7 +18,7 @@ export def build [
                     -czvf $"target/($name)-($t)-($version).tar.gz" 
                     $name)
             }
-            "aarch64-pc-windows-msvc" | "x86_64-pc-windows-msvc" => {
+            "i686-pc-windows-msvc" | "x86_64-pc-windows-msvc" => {
                 mv $"target/($t)/release/($name).exe" $"target/($name)-($t)-($version).exe"
             }
         }
