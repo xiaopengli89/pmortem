@@ -1,5 +1,5 @@
 use mach2::{
-    exception_types, kern_return, mach_port, mach_types, message, ndr, port, structs, task,
+    exc, exception_types, kern_return, mach_port, mach_types, message, ndr, port, structs, task,
     task_info, thread_act, thread_status, traps, vm, vm_types,
 };
 use std::{
@@ -114,12 +114,16 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
             let _ = code;
         }
         Event::Exception => {
-            let mut msg: ExceptionMessage = mem::zeroed();
+            let mut msg_box: Vec<u8> = Vec::with_capacity(
+                mem::size_of::<exc::__Request__exception_raise_t>()
+                    + mem::size_of::<message::mach_msg_trailer_t>(),
+            );
+            let msg = &mut *(msg_box.as_mut_ptr() as *mut exc::__Request__exception_raise_t);
             r = message::mach_msg(
-                &mut msg.header,
+                &mut msg.Head,
                 message::MACH_RCV_MSG,
                 0,
-                mem::size_of_val(&msg) as _,
+                msg_box.capacity() as _,
                 exc_port.name,
                 message::MACH_MSG_TIMEOUT_NONE,
                 port::MACH_PORT_NULL,
@@ -142,13 +146,28 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
                         crash_context::ExceptionInfo {
                             kind: msg.exception as _,
                             code: msg.code[0] as _,
-                            subcode: (msg.code_count > 1).then_some(msg.code[1] as u64),
+                            subcode: (msg.codeCnt > 1).then_some(msg.code[1] as u64),
                         },
                     ),
                 },
             )
             .dump(output)
             .unwrap();
+
+            // let mut reply = exc::__Reply__exception_raise_t {
+            //     Head: message::mach_msg_header_t {
+            //         msgh_bits: message::MACH_MSGH_BITS_REMOTE_MASK & msg.Head.msgh_bits,
+            //         msgh_size: mem::size_of::<exc::__Reply__exception_raise_t>() as _,
+            //         msgh_remote_port: msg.Head.msgh_remote_port,
+            //         msgh_local_port: port::MACH_PORT_NULL,
+            //         msgh_voucher_port: port::MACH_PORT_NULL,
+            //         msgh_id: msg.Head.msgh_id + 1,
+            //     },
+            //     NDR: ndr::NDR_record,
+            //     RetCode: kern_return::KERN_SUCCESS,
+            // };
+            // r = message::mach_msg_send(&mut reply.Head);
+            // assert_eq!(r, kern_return::KERN_SUCCESS);
         }
     }
 }
@@ -452,17 +471,4 @@ fn wait_for(pid: i32, exc_port: &Port) -> Event {
 enum Event {
     Exit(i32),
     Exception,
-}
-
-#[repr(C)]
-struct ExceptionMessage {
-    header: message::mach_msg_header_t,
-    body: message::mach_msg_body_t,
-    thread: message::mach_msg_port_descriptor_t,
-    task: message::mach_msg_port_descriptor_t,
-    ndr: ndr::NDR_record_t,
-    exception: exception_types::exception_type_t,
-    code_count: message::mach_msg_type_number_t,
-    code: [exception_types::exception_data_type_t; 2],
-    trailer: message::mach_msg_trailer_t,
 }
