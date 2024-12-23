@@ -63,23 +63,28 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
     );
     assert_eq!(r, kern_return::KERN_SUCCESS);
 
+    let mon = Monitor::new();
+
     if catch_exit {
-        thread::spawn(move || {
-            let _ = process::Command::new("lldb")
-                .args([
-                    "-p",
-                    &pid.to_string(),
-                    "-o",
-                    "breakpoint set --name __exit",
-                    "-o",
-                    "c",
-                    "-o",
-                    "quit",
-                ])
-                .output()
-                .unwrap();
+        let mut dt = dtrace::Dtrace::new().unwrap();
+        dt.setopt_c(c"strsize", c"4096").unwrap();
+        dt.setopt_c(c"bufsize", c"4m").unwrap();
+        dt.setopt_c(c"destructive", c"true").unwrap();
+        dt.exec_program(&format!("pid{}::__exit:entry{{stop(); exit(0)}}", pid))
+            .unwrap();
+        dt.go().unwrap();
+
+        let mon = mon.clone();
+        thread::spawn(move || loop {
+            match dt.work(|_| {}) {
+                Ok(false) => {}
+                Ok(true) => {
+                    mon.wake();
+                    break;
+                }
+                Err(_) => break,
+            }
         });
-        thread::sleep(Duration::from_secs(1));
     }
 
     let _old_exc_port = {
@@ -107,7 +112,7 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
     };
 
     println!("inspecting process: {}", pid);
-    let wait_r = wait_for(pid, &exc_port);
+    let wait_r = mon.wait(pid, &exc_port);
 
     match wait_r {
         Event::Exit(code) => {
@@ -153,21 +158,19 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
             )
             .dump(output)
             .unwrap();
-
-            // let mut reply = exc::__Reply__exception_raise_t {
-            //     Head: message::mach_msg_header_t {
-            //         msgh_bits: message::MACH_MSGH_BITS_REMOTE_MASK & msg.Head.msgh_bits,
-            //         msgh_size: mem::size_of::<exc::__Reply__exception_raise_t>() as _,
-            //         msgh_remote_port: msg.Head.msgh_remote_port,
-            //         msgh_local_port: port::MACH_PORT_NULL,
-            //         msgh_voucher_port: port::MACH_PORT_NULL,
-            //         msgh_id: msg.Head.msgh_id + 1,
-            //     },
-            //     NDR: ndr::NDR_record,
-            //     RetCode: kern_return::KERN_SUCCESS,
-            // };
-            // r = message::mach_msg_send(&mut reply.Head);
-            // assert_eq!(r, kern_return::KERN_SUCCESS);
+        }
+        Event::Stop => {
+            minidump_writer::minidump_writer::MinidumpWriter::with_crash_context(
+                crash_context::CrashContext {
+                    task: task.port.name,
+                    thread: port::MACH_PORT_NULL,
+                    handler_thread: port::MACH_PORT_NULL,
+                    exception: None,
+                },
+            )
+            .dump(output)
+            .unwrap();
+            let _ = libc::kill(pid, libc::SIGCONT);
         }
     }
 }
@@ -421,49 +424,127 @@ impl Task {
     }
 }
 
-fn wait_for(pid: i32, exc_port: &Port) -> Event {
-    unsafe {
-        let fd = libc::kqueue();
-        assert_ne!(fd, -1);
-        let fd = fd::OwnedFd::from_raw_fd(fd);
+struct Monitor {
+    fd: fd::OwnedFd,
+}
 
-        let mut r;
-        {
-            let event = libc::kevent {
-                ident: pid as _,
-                filter: libc::EVFILT_PROC,
-                flags: libc::EV_ADD | libc::EV_ENABLE,
-                fflags: libc::NOTE_EXIT,
-                data: 0,
-                udata: ptr::null_mut(),
-            };
-            r = libc::kevent(fd.as_raw_fd(), &event, 1, ptr::null_mut(), 0, ptr::null());
-            assert_ne!(r, -1);
+impl Clone for Monitor {
+    fn clone(&self) -> Self {
+        Self {
+            fd: self.fd.try_clone().unwrap(),
         }
+    }
+}
 
-        {
-            let event = libc::kevent {
-                ident: exc_port.name as _,
-                filter: libc::EVFILT_MACHPORT,
-                flags: libc::EV_ADD | libc::EV_RECEIPT,
-                fflags: 0,
-                data: 0,
-                udata: ptr::null_mut(),
-            };
-            r = libc::kevent(fd.as_raw_fd(), &event, 1, ptr::null_mut(), 0, ptr::null());
-            assert_ne!(r, -1);
+impl Monitor {
+    fn new() -> Self {
+        unsafe {
+            let fd = libc::kqueue();
+            assert_ne!(fd, -1);
+            let fd = fd::OwnedFd::from_raw_fd(fd);
+
+            {
+                let event = libc::kevent {
+                    ident: 0,
+                    filter: libc::EVFILT_USER,
+                    flags: libc::EV_ADD | libc::EV_CLEAR,
+                    fflags: 0,
+                    data: 0,
+                    udata: ptr::null_mut(),
+                };
+                let r = libc::kevent(fd.as_raw_fd(), &event, 1, ptr::null_mut(), 0, ptr::null());
+                assert_ne!(r, -1);
+            }
+
+            Self { fd }
         }
+    }
 
-        let mut event: libc::kevent = mem::zeroed();
-        loop {
-            let n = libc::kevent(fd.as_raw_fd(), ptr::null(), 0, &mut event, 1, ptr::null());
-            if n > 0 {
-                if event.filter == libc::EVFILT_PROC {
-                    break Event::Exit(event.data as _);
-                } else if event.filter == libc::EVFILT_MACHPORT {
-                    break Event::Exception;
+    fn wait(&self, pid: i32, exc_port: &Port) -> Event {
+        unsafe {
+            let mut r;
+            {
+                let event = libc::kevent {
+                    ident: pid as _,
+                    filter: libc::EVFILT_PROC,
+                    flags: libc::EV_ADD | libc::EV_ENABLE,
+                    fflags: libc::NOTE_EXIT,
+                    data: 0,
+                    udata: ptr::null_mut(),
+                };
+                r = libc::kevent(
+                    self.fd.as_raw_fd(),
+                    &event,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null(),
+                );
+                assert_ne!(r, -1);
+            }
+
+            {
+                let event = libc::kevent {
+                    ident: exc_port.name as _,
+                    filter: libc::EVFILT_MACHPORT,
+                    flags: libc::EV_ADD | libc::EV_RECEIPT,
+                    fflags: 0,
+                    data: 0,
+                    udata: ptr::null_mut(),
+                };
+                r = libc::kevent(
+                    self.fd.as_raw_fd(),
+                    &event,
+                    1,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null(),
+                );
+                assert_ne!(r, -1);
+            }
+
+            let mut event: libc::kevent = mem::zeroed();
+            loop {
+                let n = libc::kevent(
+                    self.fd.as_raw_fd(),
+                    ptr::null(),
+                    0,
+                    &mut event,
+                    1,
+                    ptr::null(),
+                );
+                if n > 0 {
+                    if event.filter == libc::EVFILT_PROC {
+                        break Event::Exit(event.data as _);
+                    } else if event.filter == libc::EVFILT_MACHPORT {
+                        break Event::Exception;
+                    } else if event.filter == libc::EVFILT_USER {
+                        break Event::Stop;
+                    }
                 }
             }
+        }
+    }
+
+    fn wake(&self) {
+        unsafe {
+            let event = libc::kevent {
+                ident: 0,
+                filter: libc::EVFILT_USER,
+                flags: 0,
+                fflags: libc::NOTE_TRIGGER,
+                data: 0,
+                udata: ptr::null_mut(),
+            };
+            let r = libc::kevent(
+                self.fd.as_raw_fd(),
+                &event,
+                1,
+                ptr::null_mut(),
+                0,
+                ptr::null(),
+            );
+            assert_ne!(r, -1);
         }
     }
 }
@@ -471,4 +552,5 @@ fn wait_for(pid: i32, exc_port: &Port) -> Event {
 enum Event {
     Exit(i32),
     Exception,
+    Stop,
 }

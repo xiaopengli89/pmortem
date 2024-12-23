@@ -1,4 +1,4 @@
-use std::{hint, io, process, ptr};
+use std::{io, process, ptr};
 
 fn main() {
     println!("pid: {}", process::id());
@@ -22,6 +22,6 @@ fn foo() {
     }
     io::stdin().read_line(&mut String::new()).unwrap();
 
-    let _ = hint::black_box(unsafe { *ptr::null_mut::<i32>().offset(1) });
+    let _ = std::hint::black_box(unsafe { *ptr::null_mut::<i32>().offset(1) });
     process::exit(0);
 }
