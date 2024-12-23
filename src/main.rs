@@ -14,6 +14,10 @@ fn main() {
         exception,
         exit,
     } = Cli::parse();
+    let output = output.unwrap_or_else(|| {
+        let now = chrono::Local::now();
+        PathBuf::from(format!("PID_{pid}_{}.dmp", now.format("%Y%m%d_%H%M%S")))
+    });
     let mut output_file = File::create(&output).unwrap();
     #[cfg(target_os = "macos")]
     unsafe {
@@ -31,7 +35,7 @@ struct Cli {
     pid: i32,
     /// Output dump file
     #[arg(short, long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
     /// Write a dump when the process encounters an unhandled exception
     #[arg(short, long, default_value_t = false)]
     exception: bool,
