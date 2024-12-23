@@ -1,5 +1,5 @@
 use mach2::{
-    exc, exception_types, kern_return, mach_port, mach_types, message, ndr, port, structs, task,
+    exc, exception_types, kern_return, mach_port, mach_types, message, port, structs, task,
     task_info, thread_act, thread_status, traps, vm, vm_types,
 };
 use std::{
@@ -7,8 +7,7 @@ use std::{
     io::{Seek, Write},
     mem,
     os::fd::{self, AsRawFd, FromRawFd},
-    process, ptr, thread,
-    time::Duration,
+    ptr, thread,
 };
 
 #[allow(
