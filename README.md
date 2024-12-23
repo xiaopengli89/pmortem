@@ -1,5 +1,7 @@
+# pmortem
 A process dumper built in Rust.
 
+# Usage
 - Dump the process with PID '1324':
 ```sh
 pmortem -o foo.dmp 1324
