@@ -149,8 +149,9 @@ dependencies = [
 
 [[package]]
 name = "dtrace"
-version = "0.1.0"
-source = "git+https://github.com/xiaopengli89/dtrace-rs#9b82ab96cdbbd04e94634ca193508545e2e966d8"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d30a15c211fa768b697a03387a611758412bfe9b0b02ec9373dec93484416856"
 dependencies = [
  "libc",
  "thiserror 2.0.9",
