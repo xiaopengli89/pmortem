@@ -6,7 +6,7 @@ A process dumper built in Rust.
 λ pmortem -h
 A process dumper
 
-Usage: pmortem [OPTIONS] --output <OUTPUT> <PID>
+Usage: pmortem [OPTIONS] <PID>
 
 Arguments:
   <PID>
