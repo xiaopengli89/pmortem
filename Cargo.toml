@@ -2,6 +2,7 @@
 name = "pmortem"
 version = "0.1.0"
 edition = "2021"
+description = "A process dumper"
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }

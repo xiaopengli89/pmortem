@@ -29,10 +29,13 @@ fn main() {
 #[command(version, about, long_about = None)]
 struct Cli {
     pid: i32,
+    /// Output dump file
     #[arg(short, long)]
     output: PathBuf,
+    /// Write a dump when the process encounters an unhandled exception
     #[arg(short, long, default_value_t = false)]
     exception: bool,
+    /// Write a dump when the process exit
     #[arg(long, default_value_t = false)]
     exit: bool,
 }
