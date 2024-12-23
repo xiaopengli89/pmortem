@@ -9,15 +9,20 @@ mod windows;
 
 fn main() {
     let cli = Cli::parse();
-    let Commands::Inspect { pid, output, exit } = cli.command;
+    let Commands::Inspect {
+        pid,
+        output,
+        exception,
+        exit,
+    } = cli.command;
     let mut output_file = File::create(&output).unwrap();
     #[cfg(target_os = "macos")]
     unsafe {
-        macos::inspect(pid, exit, &mut output_file)
+        macos::inspect(pid, exception, exit, &mut output_file)
     };
     #[cfg(windows)]
     unsafe {
-        windows::inspect(pid, exit, &mut output_file)
+        windows::inspect(pid, exception, exit, &mut output_file)
     };
 }
 
@@ -34,6 +39,8 @@ enum Commands {
         pid: i32,
         #[arg(short, long)]
         output: PathBuf,
+        #[arg(short, long, default_value_t = false)]
+        exception: bool,
         #[arg(long, default_value_t = false)]
         exit: bool,
     },

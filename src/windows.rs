@@ -12,8 +12,24 @@ use windows::{
     },
 };
 
-pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut File) {
+pub unsafe fn inspect(pid: i32, catch_exc: bool, catch_exit: bool, output: &mut File) {
     let process_id = pid as u32;
+
+    if !catch_exc && !catch_exit {
+        minidump_writer::minidump_writer::MinidumpWriter::dump_crash_context(
+            crash_context::CrashContext {
+                process_id,
+                thread_id: 0,
+                exception_code: 0,
+                exception_pointers: ptr::null(),
+            },
+            None,
+            output,
+        )
+        .unwrap();
+        return;
+    }
+
     let mut process_h = Threading::OpenProcess(
         Threading::PROCESS_VM_OPERATION | Threading::PROCESS_VM_WRITE,
         false,

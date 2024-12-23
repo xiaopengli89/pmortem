@@ -32,7 +32,12 @@ mod loader;
 )]
 mod nlist;
 
-pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + Seek)) {
+pub unsafe fn inspect(
+    pid: i32,
+    catch_exc: bool,
+    catch_exit: bool,
+    output: &mut (impl Write + Seek),
+) {
     let mut r;
 
     let task = {
@@ -43,6 +48,22 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
             port: Port { name: task_name },
         }
     };
+
+    if !catch_exc && !catch_exit {
+        task.suspend();
+        let mw_r = minidump_writer::minidump_writer::MinidumpWriter::with_crash_context(
+            crash_context::CrashContext {
+                task: task.port.name,
+                thread: port::MACH_PORT_NULL,
+                handler_thread: port::MACH_PORT_NULL,
+                exception: None,
+            },
+        )
+        .dump(output);
+        task.resume();
+        mw_r.unwrap();
+        return;
+    }
 
     let exc_port = {
         let mut notify_name = 0;
@@ -190,6 +211,16 @@ struct Task {
 }
 
 impl Task {
+    fn suspend(&self) {
+        let r = unsafe { task::task_suspend(self.port.name) };
+        assert_eq!(r, kern_return::KERN_SUCCESS);
+    }
+
+    fn resume(&self) {
+        let r = unsafe { task::task_resume(self.port.name) };
+        assert_eq!(r, kern_return::KERN_SUCCESS);
+    }
+
     unsafe fn read<T>(&self, ptr: *const T) -> T {
         let mut v = mem::zeroed();
         let mut cnt = 0;
