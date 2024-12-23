@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use serde::Serialize;
 use std::{fs::File, path::PathBuf};
 
@@ -8,13 +8,12 @@ mod macos;
 mod windows;
 
 fn main() {
-    let cli = Cli::parse();
-    let Commands::Inspect {
+    let Cli {
         pid,
         output,
         exception,
         exit,
-    } = cli.command;
+    } = Cli::parse();
     let mut output_file = File::create(&output).unwrap();
     #[cfg(target_os = "macos")]
     unsafe {
@@ -29,21 +28,13 @@ fn main() {
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Inspect {
-        pid: i32,
-        #[arg(short, long)]
-        output: PathBuf,
-        #[arg(short, long, default_value_t = false)]
-        exception: bool,
-        #[arg(long, default_value_t = false)]
-        exit: bool,
-    },
+    pid: i32,
+    #[arg(short, long)]
+    output: PathBuf,
+    #[arg(short, long, default_value_t = false)]
+    exception: bool,
+    #[arg(long, default_value_t = false)]
+    exit: bool,
 }
 
 #[allow(dead_code)]
