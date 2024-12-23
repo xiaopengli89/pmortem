@@ -126,9 +126,9 @@ pub unsafe fn inspect(
             &mut old_flavors,
         );
         assert_eq!(r, kern_return::KERN_SUCCESS);
-        Port {
+        (old_exc_port_name != port::MACH_PORT_NULL).then_some(Port {
             name: old_exc_port_name,
-        }
+        })
     };
 
     println!("inspecting process: {}", pid);
