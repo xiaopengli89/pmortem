@@ -146,13 +146,11 @@ pub unsafe fn inspect(pid: i32, catch_exit: bool, output: &mut (impl Write + See
                     task: exc_task_port.name,
                     thread: exc_thread_port.name,
                     handler_thread: port::MACH_PORT_NULL,
-                    exception: (msg.exception != dyld_images::EXC_BREAKPOINT as i32).then_some(
-                        crash_context::ExceptionInfo {
-                            kind: msg.exception as _,
-                            code: msg.code[0] as _,
-                            subcode: (msg.codeCnt > 1).then_some(msg.code[1] as u64),
-                        },
-                    ),
+                    exception: Some(crash_context::ExceptionInfo {
+                        kind: msg.exception as _,
+                        code: msg.code[0] as _,
+                        subcode: (msg.codeCnt > 1).then_some(msg.code[1] as u64),
+                    }),
                 },
             )
             .dump(output)
