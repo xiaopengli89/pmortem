@@ -1,5 +1,11 @@
 export-env {
-    $env.MACOSX_DEPLOYMENT_TARGET = "10.13"
+    if (sys host).name == "Darwin" {
+        $env.MACOSX_DEPLOYMENT_TARGET = "10.13"
+    }
+
+    if (sys host).name == "Windows" {
+        $env.RUSTFLAGS = "-C target-feature=+crt-static"
+    }
 }
 
 export def build [
