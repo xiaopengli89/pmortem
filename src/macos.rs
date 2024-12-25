@@ -32,12 +32,16 @@ mod loader;
 )]
 mod nlist;
 
-pub unsafe fn inspect(
+pub unsafe fn inspect<W: Write + Seek>(
     pid: i32,
     catch_exc: bool,
     catch_exit: bool,
-    output: &mut (impl Write + Seek),
+    output_f: impl FnOnce() -> W,
 ) {
+    if libc::getuid() != 0 {
+        println!("root privilege required");
+        return;
+    }
     let mut r;
 
     let task = {
@@ -59,7 +63,7 @@ pub unsafe fn inspect(
                 exception: None,
             },
         )
-        .dump(output);
+        .dump(&mut output_f());
         task.resume();
         mw_r.unwrap();
         return;
@@ -174,7 +178,7 @@ pub unsafe fn inspect(
                     }),
                 },
             )
-            .dump(output)
+            .dump(&mut output_f())
             .unwrap();
         }
         Event::Stop => {
@@ -186,7 +190,7 @@ pub unsafe fn inspect(
                     exception: None,
                 },
             )
-            .dump(output)
+            .dump(&mut output_f())
             .unwrap();
             let _ = libc::kill(pid, libc::SIGCONT);
         }

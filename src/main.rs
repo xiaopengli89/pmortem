@@ -14,18 +14,20 @@ fn main() {
         exception,
         exit,
     } = Cli::parse();
-    let output = output.unwrap_or_else(|| {
-        let now = chrono::Local::now();
-        PathBuf::from(format!("PID_{pid}_{}.dmp", now.format("%Y%m%d_%H%M%S")))
-    });
-    let mut output_file = File::create(&output).unwrap();
+    let output_f = || {
+        let output = output.unwrap_or_else(|| {
+            let now = chrono::Local::now();
+            PathBuf::from(format!("PID_{pid}_{}.dmp", now.format("%Y%m%d_%H%M%S")))
+        });
+        File::create(&output).unwrap()
+    };
     #[cfg(target_os = "macos")]
     unsafe {
-        macos::inspect(pid, exception, exit, &mut output_file)
+        macos::inspect(pid, exception, exit, output_f)
     };
     #[cfg(windows)]
     unsafe {
-        windows::inspect(pid, exception, exit, &mut output_file)
+        windows::inspect(pid, exception, exit, output_f)
     };
 }
 

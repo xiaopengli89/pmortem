@@ -12,7 +12,12 @@ use windows::{
     },
 };
 
-pub unsafe fn inspect(pid: i32, catch_exc: bool, catch_exit: bool, output: &mut File) {
+pub unsafe fn inspect(
+    pid: i32,
+    catch_exc: bool,
+    catch_exit: bool,
+    output_f: impl FnOnce() -> File,
+) {
     let process_id = pid as u32;
 
     if !catch_exc && !catch_exit {
@@ -24,7 +29,7 @@ pub unsafe fn inspect(pid: i32, catch_exc: bool, catch_exit: bool, output: &mut 
                 exception_pointers: ptr::null(),
             },
             None,
-            output,
+            &mut output_f(),
         )
         .unwrap();
         return;
@@ -81,7 +86,7 @@ pub unsafe fn inspect(pid: i32, catch_exc: bool, catch_exit: bool, output: &mut 
                         ) as _,
                     },
                     None,
-                    output,
+                    &mut output_f(),
                 )
                 .unwrap();
                 let _ = Debug::ContinueDebugEvent(
@@ -101,7 +106,7 @@ pub unsafe fn inspect(pid: i32, catch_exc: bool, catch_exit: bool, output: &mut 
                             exception_pointers: ptr::null(),
                         },
                         None,
-                        output,
+                        &mut output_f(),
                     )
                     .unwrap();
                 }
