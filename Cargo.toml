@@ -3,6 +3,8 @@ name = "pmortem"
 version = "0.1.0"
 edition = "2021"
 description = "A process dumper"
+repository = "https://github.com/xiaopengli89/pmortem"
+license = "Apache-2.0 OR MIT"
 
 [dependencies]
 chrono = "0.4.39"
